@@ -1,0 +1,21 @@
+DiRT Rally 2.0 — VR Grass Flicker Fix
+Copyright (C) 2026 armax9
+Licensed under GNU LGPL version 2.1 or, at your option, any later version.
+See LICENSE for the full license. Provided without warranty.
+
+DXBC checksum implementation (checksum.c)
+From Wine/vkd3d, libs/vkd3d-shader/checksum.c.
+Copyright (C) 2001 Nikos Mavroyanopoulos
+Copyright (C) 2004 Hans Leidekker
+Licensed under GNU LGPL version 2.1 or, at your option, any later version.
+The original copyright and license notices are retained in checksum.c.
+The file's original note credits public-domain MD5 code by Colin Plumb (1993).
+
+vkd3d_shader_private.h in this repository is a small local compatibility
+header for the checksum implementation, not the complete upstream header.
+
+No game executables, assets or complete game shaders are distributed.
+DiRT Rally 2.0 and other product names belong to their respective owners.
+
+Statically linked LLVM/MinGW runtime components retain their respective
+licenses. See LICENSE-LLVM.txt and LICENSE-MinGW.txt.

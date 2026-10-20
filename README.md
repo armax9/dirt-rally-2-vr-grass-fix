@@ -25,7 +25,7 @@ This patches specific game code and shaders. Only recognized game code and shade
 Requires an x86-64 Windows llvm-mingw toolchain on `PATH`:
 
 ```sh
-./build.sh
+sh build.sh
 ```
 
 ## License

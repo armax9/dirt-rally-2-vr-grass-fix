@@ -1,4 +1,4 @@
-DiRT Rally 2.0 — VR Grass Flicker Fix
+DiRT Rally 2.0 — VR Grass and Menu Colour Fix
 Copyright (C) 2026 armax9
 Licensed under GNU LGPL version 2.1 or, at your option, any later version.
 See LICENSE for the full license. Provided without warranty.
@@ -17,5 +17,5 @@ header for the checksum implementation, not the complete upstream header.
 No game executables, assets or complete game shaders are distributed.
 DiRT Rally 2.0 and other product names belong to their respective owners.
 
-Statically linked LLVM/MinGW runtime components retain their respective
-licenses. See LICENSE-LLVM.txt and LICENSE-MinGW.txt.
+The v1.2.0 release uses MSVC with a static runtime. LLVM/MinGW license files
+are retained for the earlier source and release history.

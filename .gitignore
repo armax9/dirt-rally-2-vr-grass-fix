@@ -1,3 +1,8 @@
 /build/
 *.zip
+*.dll
+*.obj
+*.lib
+*.exp
+*.pdb
 .DS_Store

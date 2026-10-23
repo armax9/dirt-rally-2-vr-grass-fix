@@ -11,6 +11,7 @@
 #include "generator_patch.h"
 #include "vs_patch.h"
 #include "uv_fade.h"
+#include "menu_gamma.h"
 
 // Original D3D11 COM objects and shader fallback behavior are retained.
 static INIT_ONCE versionOnce=INIT_ONCE_STATIC_INIT;
@@ -34,6 +35,13 @@ static HRESULT STDMETHODCALLTYPE captureVS(ID3D11Device* dev,const void* data,SI
 
 static HRESULT STDMETHODCALLTYPE capturePS(ID3D11Device* dev,const void* data,SIZE_T len,ID3D11ClassLinkage* linkage,ID3D11PixelShader** result) {
  std::vector<unsigned char> patched;
+ auto menuResult=dirtMenuGamma::patch(data,len,patched);
+ if(menuResult!=dirtMenuGamma::Result::NoMatch){
+  HRESULT hr=E_FAIL;
+  if(menuResult==dirtMenuGamma::Result::Patched)hr=originalCreatePS(dev,patched.data(),patched.size(),linkage,result);
+  if(SUCCEEDED(hr))return hr;
+ }
+
  if(grassUVFade::patch(data,len,patched)==grassUVFade::Result::Patched){
   HRESULT hr=originalCreatePS(dev,patched.data(),patched.size(),linkage,result);
   if(SUCCEEDED(hr))return hr;
@@ -92,16 +100,16 @@ extern "C" DWORD WINAPI GetFileVersionInfoSizeA(LPCSTR file,LPDWORD handle){Init
 extern "C" DWORD WINAPI GetFileVersionInfoSizeExA(DWORD flags,LPCSTR file,LPDWORD handle){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&GetFileVersionInfoSizeExA))GetProcAddress(versionModule,"GetFileVersionInfoSizeExA"):nullptr;return fn?fn(flags,file,handle):0;}
 extern "C" BOOL WINAPI VerQueryValueA(LPCVOID data,LPCSTR block,LPVOID* buffer,PUINT len){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&VerQueryValueA))GetProcAddress(versionModule,"VerQueryValueA"):nullptr;return fn?fn(data,block,buffer,len):FALSE;}
 extern "C" DWORD WINAPI VerLanguageNameA(DWORD language,LPSTR buffer,DWORD size){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&VerLanguageNameA))GetProcAddress(versionModule,"VerLanguageNameA"):nullptr;return fn?fn(language,buffer,size):0;}
-extern "C" DWORD WINAPI VerFindFileA(DWORD flags,LPSTR file,LPSTR windowsDir,LPSTR appDir,LPSTR currentDir,PUINT currentLen,LPSTR destDir,PUINT destLen){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&VerFindFileA))GetProcAddress(versionModule,"VerFindFileA"):nullptr;return fn?fn(flags,file,windowsDir,appDir,currentDir,currentLen,destDir,destLen):VFF_FILEINUSE;}
-extern "C" DWORD WINAPI VerInstallFileA(DWORD flags,LPSTR srcFile,LPSTR destFile,LPSTR srcDir,LPSTR destDir,LPSTR currentDir,LPSTR tempFile,PUINT tempLen){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&VerInstallFileA))GetProcAddress(versionModule,"VerInstallFileA"):nullptr;return fn?fn(flags,srcFile,destFile,srcDir,destDir,currentDir,tempFile,tempLen):VIF_CANNOTREADSRC;}
+extern "C" DWORD WINAPI VerFindFileA(DWORD flags,LPCSTR file,LPCSTR windowsDir,LPCSTR appDir,LPSTR currentDir,PUINT currentLen,LPSTR destDir,PUINT destLen){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&VerFindFileA))GetProcAddress(versionModule,"VerFindFileA"):nullptr;return fn?fn(flags,file,windowsDir,appDir,currentDir,currentLen,destDir,destLen):VFF_FILEINUSE;}
+extern "C" DWORD WINAPI VerInstallFileA(DWORD flags,LPCSTR srcFile,LPCSTR destFile,LPCSTR srcDir,LPCSTR destDir,LPCSTR currentDir,LPSTR tempFile,PUINT tempLen){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&VerInstallFileA))GetProcAddress(versionModule,"VerInstallFileA"):nullptr;return fn?fn(flags,srcFile,destFile,srcDir,destDir,currentDir,tempFile,tempLen):VIF_CANNOTREADSRC;}
 extern "C" BOOL WINAPI GetFileVersionInfoW(LPCWSTR file,DWORD handle,DWORD len,LPVOID data){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&GetFileVersionInfoW))GetProcAddress(versionModule,"GetFileVersionInfoW"):nullptr;return fn?fn(file,handle,len,data):FALSE;}
 extern "C" BOOL WINAPI GetFileVersionInfoExW(DWORD flags,LPCWSTR file,DWORD handle,DWORD len,LPVOID data){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&GetFileVersionInfoExW))GetProcAddress(versionModule,"GetFileVersionInfoExW"):nullptr;return fn?fn(flags,file,handle,len,data):FALSE;}
 extern "C" DWORD WINAPI GetFileVersionInfoSizeW(LPCWSTR file,LPDWORD handle){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&GetFileVersionInfoSizeW))GetProcAddress(versionModule,"GetFileVersionInfoSizeW"):nullptr;return fn?fn(file,handle):0;}
 extern "C" DWORD WINAPI GetFileVersionInfoSizeExW(DWORD flags,LPCWSTR file,LPDWORD handle){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&GetFileVersionInfoSizeExW))GetProcAddress(versionModule,"GetFileVersionInfoSizeExW"):nullptr;return fn?fn(flags,file,handle):0;}
 extern "C" BOOL WINAPI VerQueryValueW(LPCVOID data,LPCWSTR block,LPVOID* buffer,PUINT len){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&VerQueryValueW))GetProcAddress(versionModule,"VerQueryValueW"):nullptr;return fn?fn(data,block,buffer,len):FALSE;}
 extern "C" DWORD WINAPI VerLanguageNameW(DWORD language,LPWSTR buffer,DWORD size){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&VerLanguageNameW))GetProcAddress(versionModule,"VerLanguageNameW"):nullptr;return fn?fn(language,buffer,size):0;}
-extern "C" DWORD WINAPI VerFindFileW(DWORD flags,LPWSTR file,LPWSTR windowsDir,LPWSTR appDir,LPWSTR currentDir,PUINT currentLen,LPWSTR destDir,PUINT destLen){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&VerFindFileW))GetProcAddress(versionModule,"VerFindFileW"):nullptr;return fn?fn(flags,file,windowsDir,appDir,currentDir,currentLen,destDir,destLen):VFF_FILEINUSE;}
-extern "C" DWORD WINAPI VerInstallFileW(DWORD flags,LPWSTR srcFile,LPWSTR destFile,LPWSTR srcDir,LPWSTR destDir,LPWSTR currentDir,LPWSTR tempFile,PUINT tempLen){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&VerInstallFileW))GetProcAddress(versionModule,"VerInstallFileW"):nullptr;return fn?fn(flags,srcFile,destFile,srcDir,destDir,currentDir,tempFile,tempLen):VIF_CANNOTREADSRC;}
+extern "C" DWORD WINAPI VerFindFileW(DWORD flags,LPCWSTR file,LPCWSTR windowsDir,LPCWSTR appDir,LPWSTR currentDir,PUINT currentLen,LPWSTR destDir,PUINT destLen){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&VerFindFileW))GetProcAddress(versionModule,"VerFindFileW"):nullptr;return fn?fn(flags,file,windowsDir,appDir,currentDir,currentLen,destDir,destLen):VFF_FILEINUSE;}
+extern "C" DWORD WINAPI VerInstallFileW(DWORD flags,LPCWSTR srcFile,LPCWSTR destFile,LPCWSTR srcDir,LPCWSTR destDir,LPCWSTR currentDir,LPWSTR tempFile,PUINT tempLen){InitOnceExecuteOnce(&versionOnce,initVersion,nullptr,nullptr);auto fn=versionModule?(decltype(&VerInstallFileW))GetProcAddress(versionModule,"VerInstallFileW"):nullptr;return fn?fn(flags,srcFile,destFile,srcDir,destDir,currentDir,tempFile,tempLen):VIF_CANNOTREADSRC;}
 BOOL WINAPI DllMain(HINSTANCE,DWORD reason,LPVOID){
  if(reason==DLL_PROCESS_ATTACH){
   wchar_t exePath[MAX_PATH]={};

@@ -1,0 +1,17 @@
+DiRT Rally 2.0 VR Grass Fix v1.1.0
+
+Fixes additional distant-grass flicker caused by the default far billboard
+instance buffer reaching its limit after camera-frustum rejection is disabled.
+The reserve now follows both aligned generation grids, with a checked 256 MiB
+ceiling for the total instance buffer. Near grass and explicit material caps
+remain unchanged. Native D3DMetal mapped metadata is handled correctly.
+
+Confirmed by the user on Hawke's Bay Reverse. All 21 captured snapshots were
+below their limits after the fix. Other tracks have not been exhaustively tested.
+
+Clean build: no diagnostic logs, GPU readback, snapshot queries, or mode switching.
+Previous shader, fade and bounds fixes are retained. OpenComposite is unchanged.
+Increased rendered vegetation may increase GPU work; no FPS gain is promised.
+
+Install version.dll beside dirtrally2.exe, retaining the existing Native, then
+Builtin version.dll override. Back up any existing version.dll first.

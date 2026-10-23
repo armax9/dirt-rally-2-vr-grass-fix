@@ -5,6 +5,9 @@
 #include <stdint.h>
 #include <string.h>
 #include <cmath>
+#include <vector>
+#include <initializer_list>
+#include "far_policy.h"
 
 // Called synchronously from DLL_PROCESS_ATTACH, before the game's renderer starts.
 // Only Kernel32 APIs and small CRT memory operations are used here.
@@ -18,7 +21,7 @@ static const unsigned char kSignature[42]={
  0xf3,0x44,0x0f,0x10,0x05,0x2a,0xe6,0x7f,0x00,0x44,0x0f,0x29,0x4c,0x24,0x40,
  0xf3,0x44,0x0f,0x10,0x0d,0x6f,0x3f,0x9a,0x00,0x0f,0x29,0x74,0x24,0x70,
  0x0f,0x29,0x7c,0x24,0x60,0x44,0x89,0xac,0x24,0xe0,0x00,0x00,0x00};
-struct Result {const char*status="not-requested";void*trampoline=nullptr;int32_t displacement[2]={};};
+struct Result {const char*status="not-requested";void*trampoline=nullptr;int32_t displacement[3]={};};
 
 static bool filenameIsGame(const wchar_t*p){
  const wchar_t*tail=wcsrchr(p,L'\\');tail=tail?tail+1:p;
@@ -116,6 +119,46 @@ static DimensionResult calculateDimension(const unsigned char*r,unsigned cascade
 static float generationDimension(const unsigned char*r,unsigned cascade,bool*aligned=nullptr){auto x=calculateDimension(r,cascade);if(aligned)*aligned=x.used;return x.effective;}
 static float alignedSquare0(const unsigned char*r){auto x=calculateDimension(r,0);return x.effective*x.effective;}
 static float alignedSquare1(const unsigned char*r){auto x=calculateDimension(r,1);return x.effective*x.effective;}
+// The original far branch uses a visible-sector estimate even when the shader
+// frustum predicate has been disabled. Reserve the two full generation rasters
+// for default mesh 1 only, with a checked total allocation ceiling. Explicit
+// material caps bypass this hook in the original game and remain unchanged.
+struct FarStatus{uint32_t original=0,capacity=0,nearCapacity=0;uint64_t otherCapacity=0,totalBytes=0;uint32_t dimension[2]={};bool capped=false;const char*status="not-observed";};
+#ifdef GRASS_CAPACITY_TEST_STATUS
+static FarStatus lastFarStatus;static SRWLOCK farStatusLock=SRWLOCK_INIT;
+static void publishFarStatus(const FarStatus&f){AcquireSRWLockExclusive(&farStatusLock);lastFarStatus=f;ReleaseSRWLockExclusive(&farStatusLock);}
+static FarStatus getFarStatus(){AcquireSRWLockShared(&farStatusLock);auto f=lastFarStatus;ReleaseSRWLockShared(&farStatusLock);return f;}
+#else
+static void publishFarStatus(const FarStatus&){}
+#endif
+static uint32_t farCapacity(const unsigned char*r,uint32_t originalFar,uint32_t nearCapacity,const unsigned char*sentinel,const unsigned char*current,const unsigned char*metadata){
+ FarStatus f;f.original=originalFar;f.capacity=originalFar;f.nearCapacity=nearCapacity;
+ auto done=[&](const char*why){f.status=why;publishFarStatus(f);return originalFar;};
+ if(!metadata||(uintptr_t)metadata<8)return done("invalid-near-metadata");
+ // RSI is the game's active mapped metadata entry, already dereferenced by
+ // this exact branch. Previous entry exists because the stub only calls for
+ // index 1. Native D3DMetal mapped pages may be absent from VirtualQuery.
+ memcpy(&f.nearCapacity,metadata-8,4);
+ auto d0=calculateDimension(r,0),d1=calculateDimension(r,1);
+ if(!d0.used||!d1.used)return done("generation-grid-not-ready");
+ f.dimension[0]=(uint32_t)d0.effective;f.dimension[1]=(uint32_t)d1.effective;
+ if(!current||!sentinel||!readable(current,0x30))return done("invalid-material-list");
+ const unsigned char*node=nullptr;memcpy(&node,current+8,sizeof(node));
+ unsigned visited=0;
+ while(node!=sentinel){
+  if(!node||node==current||visited++>=128||!readable(node,0x30))return done("invalid-material-tail");
+  uint32_t explicitCap=0;memcpy(&explicitCap,node+0x28,4);
+  f.otherCapacity+=explicitCap==UINT32_MAX?originalFar:explicitCap;
+  if(f.otherCapacity>grassFarPolicy::byteLimit/grassFarPolicy::stride)return done("material-tail-exceeds-safety-limit");
+  const unsigned char*next=nullptr;memcpy(&next,node+8,sizeof(next));node=next;
+ }
+ auto p=grassFarPolicy::plan(f.dimension[0],f.dimension[1],originalFar,f.nearCapacity,f.otherCapacity);
+ f.capacity=p.capacity;f.totalBytes=p.totalBytes;f.capped=p.capped;f.status=p.status;publishFarStatus(f);
+ return p.capacity;
+}
+static constexpr DWORD kFarRva=0x9f9912;
+static const unsigned char kFarInstructions[11]={0x2b,0xd0,0x45,0x85,0xf6,0x0f,0x44,0xd0,0x89,0x56,0x08};
+
 static constexpr DWORD kSquareRva[2]={0x9f9836,0x9f97b7};
 static const unsigned char kSquareInstructions[2][12]={
  {0x41,0x0f,0x28,0xc8,0x0f,0x28,0xc6,0xe8,0xee,0xa1,0x4d,0x00},
@@ -124,6 +167,7 @@ static const unsigned char kSquareInstructions[2][12]={
 static Result redirectAlignedSquares(unsigned char*base){
  Result result;
  for(unsigned i=0;i<2;++i)if(memcmp(base+kSquareRva[i],kSquareInstructions[i],12)){result.status="square-instruction-mismatch";return result;}
+ if(memcmp(base+kFarRva,kFarInstructions,11)){result.status="far-instruction-mismatch";return result;}
  SYSTEM_INFO si={};GetSystemInfo(&si);
  uintptr_t next=(uintptr_t)base+kSquareRva[0]+8;
  uintptr_t low=next>(uintptr_t)INT32_MAX?next-(uintptr_t)INT32_MAX:0;
@@ -148,27 +192,47 @@ static Result redirectAlignedSquares(unsigned char*base){
   if(!displacementFor((uintptr_t)base+kSquareRva[i]+8,(uintptr_t)stub,&result.displacement[i]))return fail("trampoline-out-of-rip-range");
   memcpy(patches[i]+4,&result.displacement[i],4);
  }
+ // The branch-local helper call has its own 48-byte aligned shadow space.
+ // RDI/RSI/RBX/R12/R14 and XMM6..15 are preserved by the Win64 helper ABI.
+ auto*farStub=page+64;std::vector<unsigned char> stub;
+ auto emit=[&](std::initializer_list<unsigned char>b){stub.insert(stub.end(),b);};
+ emit({0x2b,0xd0,0x45,0x85,0xf6,0x0f,0x44,0xd0,0x41,0x83,0xfe,0x01,0x75,0});size_t skipIndex=13;
+ emit({0x83,0x3e,0x06,0x75,0});size_t skipElements=18;
+ emit({0x48,0x83,0xec,0x30,0x41,0x89,0xc0,0x4d,0x8b,0x4c,0x24,0x18,0x49,0x83,0xc1,0x20,0x48,0x89,0x5c,0x24,0x20,0x48,0x89,0x74,0x24,0x28,0x48,0x8b,0xcf,0x48,0xb8});
+ auto helper=(uintptr_t)&farCapacity;for(unsigned k=0;k<8;++k)stub.push_back((unsigned char)(helper>>(8*k)));
+ emit({0xff,0xd0,0x48,0x83,0xc4,0x30,0x89,0x46,0x08});
+ auto resume=[&](){stub.push_back(0xe9);int32_t rel=0;if(!displacementFor((uintptr_t)farStub+stub.size()+4,(uintptr_t)base+kFarRva+11,&rel))return false;for(unsigned k=0;k<4;++k)stub.push_back((unsigned char)((uint32_t)rel>>(8*k)));return true;};
+ if(!resume())return fail("far-return-out-of-range");
+ size_t originalStore=stub.size();emit({0x89,0x56,0x08});if(!resume())return fail("far-return-out-of-range");
+ if(originalStore-(skipIndex+1)>127||originalStore-(skipElements+1)>127||stub.size()>128)return fail("far-stub-layout-invalid");
+ stub[skipIndex]=(unsigned char)(originalStore-(skipIndex+1));stub[skipElements]=(unsigned char)(originalStore-(skipElements+1));memcpy(farStub,stub.data(),stub.size());
+ unsigned char farPatch[11];memset(farPatch,0x90,11);farPatch[0]=0xe9;
+ if(!displacementFor((uintptr_t)base+kFarRva+5,(uintptr_t)farStub,&result.displacement[2]))return fail("far-trampoline-out-of-range");memcpy(farPatch+1,&result.displacement[2],4);
  DWORD ignored=0;
- if(!VirtualProtect(page,si.dwPageSize,PAGE_EXECUTE_READ,&ignored)||!FlushInstructionCache(GetCurrentProcess(),page,32))return fail("trampoline-protection-or-flush-failed");
+ if(!VirtualProtect(page,si.dwPageSize,PAGE_EXECUTE_READ,&ignored)||!FlushInstructionCache(GetCurrentProcess(),page,192))return fail("trampoline-protection-or-flush-failed");
  for(unsigned i=0;i<2;++i)if(memcmp(base+kSquareRva[i],kSquareInstructions[i],12))return fail("square-code-changed-before-patch");
- // Both exact supported sites lie within the same code page. Protect/commit
+ if(memcmp(base+kFarRva,kFarInstructions,11))return fail("far-code-changed-before-patch");
+ // All three exact supported sites lie within the same code page. Protect/commit
  // together and restore both original instruction blocks on any failure.
  uintptr_t page0=((uintptr_t)base+kSquareRva[0])&~(uintptr_t)(si.dwPageSize-1);
  uintptr_t page1=((uintptr_t)base+kSquareRva[1])&~(uintptr_t)(si.dwPageSize-1);
- if(page0!=page1)return fail("unexpected-code-page-layout");
+ if(page0!=page1||(((uintptr_t)base+kFarRva)&~(uintptr_t)(si.dwPageSize-1))!=page0)return fail("unexpected-code-page-layout");
  DWORD old=0;if(!VirtualProtect((void*)page0,si.dwPageSize,PAGE_EXECUTE_READWRITE,&old))return fail("code-protection-failed");
  for(unsigned i=0;i<2;++i)memcpy(base+kSquareRva[i],patches[i],12);
+ memcpy(base+kFarRva,farPatch,11);
  if(!FlushInstructionCache(GetCurrentProcess(),(void*)page0,si.dwPageSize)){
   for(unsigned i=0;i<2;++i)memcpy(base+kSquareRva[i],kSquareInstructions[i],12);
+  memcpy(base+kFarRva,kFarInstructions,11);
   FlushInstructionCache(GetCurrentProcess(),(void*)page0,si.dwPageSize);
   VirtualProtect((void*)page0,si.dwPageSize,old,&ignored);return fail("code-flush-failed-rolled-back");
  }
  if(!VirtualProtect((void*)page0,si.dwPageSize,old,&ignored)){
   for(unsigned i=0;i<2;++i)memcpy(base+kSquareRva[i],kSquareInstructions[i],12);
+  memcpy(base+kFarRva,kFarInstructions,11);
   FlushInstructionCache(GetCurrentProcess(),(void*)page0,si.dwPageSize);
   VirtualProtect((void*)page0,si.dwPageSize,old,&ignored);return fail("code-protection-restore-failed-rolled-back");
  }
- result.status="applied-aligned-grid";result.trampoline=page;return result;
+ result.status="applied-aligned-grid-and-far-reserve";result.trampoline=page;return result;
 }
 static Result install(unsigned char*base,const wchar_t*exePath){
  Result r;if(!filenameIsGame(exePath)){r.status="not-dirtrally2-exe";return r;}

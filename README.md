@@ -2,7 +2,9 @@
 
 A DirectX 11 patch for grass that flashes or disappears in VR.
 
-Disables the problematic camera-frustum check during grass generation and keeps the working UV-based fade and buffer guards. Enabled automatically; no settings or logging.
+Disables the problematic camera-frustum check during grass generation, reserves space for distant grass across both generation grids, and keeps the working UV-based fade and buffer guards. Enabled automatically; no settings or logging.
+
+Version 1.1.0 fixes an additional cause of flicker: distant grass could fill its instance buffer and select different plants between frames. The distant billboard reserve now follows the aligned generation-grid sizes, with a 256 MiB ceiling for the total instance buffer. Nearby grass and explicit material limits are unchanged. More vegetation can increase GPU work; this is a visual correctness fix, not an FPS boost.
 
 ## Install
 
